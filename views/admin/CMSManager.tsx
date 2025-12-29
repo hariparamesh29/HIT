@@ -5,18 +5,26 @@ import { ScrapRate, WhyItem, StatItem, CMSConfig, Product, TeamMember, AdminUser
 import { 
   Plus, Trash2, MoveUp, MoveDown, Globe, Image as ImageIcon, 
   CheckCircle2, ShoppingBag, Upload, UserPlus, AlertCircle, 
-  ShieldCheck, UserCheck, X, Navigation, Map, List, Layout, Users, TrendingUp 
+  ShieldCheck, UserCheck, X, Navigation, Map, List, Layout, Users, TrendingUp, Loader2
 } from 'lucide-react';
 
 // Helper to bust browser cache for images that are URLs
 const getBustedUrl = (url: string, version?: number) => {
   if (!url || !version || url.startsWith('data:')) return url;
+  
+  // For simulated Google Drive URLs, we look up the base64 from our "backend" store
+  if (url.includes('drive.google.com')) {
+    const assets = JSON.parse(localStorage.getItem('hari_drive_assets') || '{}');
+    return assets[url] || url;
+  }
+  
   return `${url}${url.includes('?') ? '&' : '?'}v=${version}`;
 };
 
 export const CMSManager: React.FC = () => {
-  const { draftCms, setDraftCms, publishCms, changePassword, admins, addAdmin, updateAdminStatus } = useApp();
+  const { draftCms, setDraftCms, publishCms, changePassword, admins, addAdmin, updateAdminStatus, uploadToGoogleDrive, showToast } = useApp();
   const [activeTab, setActiveTab] = useState<'General' | 'Images' | 'Why Us' | 'About Stats' | 'Team' | 'Rates' | 'Products' | 'Coverage' | 'Security'>('General');
+  const [isUploading, setIsUploading] = useState(false);
 
   // Multi-Admin Form
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
@@ -31,27 +39,44 @@ export const CMSManager: React.FC = () => {
     setDraftCms({ ...draftCms, [key]: value, updatedAt: Date.now() });
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, key: keyof CMSConfig) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, key: keyof CMSConfig) => {
     const file = e.target.files?.[0];
     if (file) {
+      setIsUploading(true);
       const reader = new FileReader();
-      reader.onloadend = () => {
-        handleCmsChange(key, reader.result as string);
+      reader.onloadend = async () => {
+        try {
+          const driveUrl = await uploadToGoogleDrive(reader.result as string);
+          handleCmsChange(key, driveUrl);
+          showToast('Asset uploaded to Google Drive');
+        } catch (err) {
+          showToast('Failed to upload asset', 'error');
+        } finally {
+          setIsUploading(false);
+        }
       };
       reader.readAsDataURL(file);
     }
   };
 
-  const handleListItemImageUpload = (e: React.ChangeEvent<HTMLInputElement>, key: keyof CMSConfig, id: string) => {
+  const handleListItemImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, key: keyof CMSConfig, id: string) => {
     const file = e.target.files?.[0];
     if (file) {
+      setIsUploading(true);
       const reader = new FileReader();
-      reader.onloadend = () => {
-        const list = draftCms[key] as any[];
-        // Determine which field name to use based on the item type
-        const fieldName = (key === 'products' || key === 'benefits') ? 'imageUrl' : 'photoUrl';
-        const newList = list.map((item: any) => item.id === id ? { ...item, [fieldName]: reader.result as string } : item);
-        handleCmsChange(key, newList);
+      reader.onloadend = async () => {
+        try {
+          const driveUrl = await uploadToGoogleDrive(reader.result as string);
+          const list = draftCms[key] as any[];
+          const fieldName = (key === 'products' || key === 'benefits') ? 'imageUrl' : 'photoUrl';
+          const newList = list.map((item: any) => item.id === id ? { ...item, [fieldName]: driveUrl } : item);
+          handleCmsChange(key, newList);
+          showToast('Asset updated in Google Drive');
+        } catch (err) {
+          showToast('Failed to upload asset', 'error');
+        } finally {
+          setIsUploading(false);
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -173,13 +198,13 @@ export const CMSManager: React.FC = () => {
     <div className="space-y-4 p-6 bg-slate-50 rounded-2xl border">
       <label className="text-xs font-black uppercase text-slate-400 block">{label}</label>
       <div className="flex items-center gap-6">
-        <div className="w-24 h-24 rounded-xl overflow-hidden bg-white border shadow-sm shrink-0">
-          <img src={getBustedUrl(current, draftCms.updatedAt)} alt={label} className="w-full h-full object-cover" />
+        <div className="w-24 h-24 rounded-xl overflow-hidden bg-white border shadow-sm shrink-0 flex items-center justify-center">
+          {isUploading ? <Loader2 className="animate-spin text-orange-500" /> : <img src={getBustedUrl(current, draftCms.updatedAt)} alt={label} className="w-full h-full object-cover" />}
         </div>
         <label className="flex-grow flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-xl p-4 cursor-pointer hover:border-orange-500 transition-colors bg-white">
           <Upload size={20} className="text-slate-400 mb-2" />
-          <span className="text-[10px] font-bold text-slate-500">Click to Upload</span>
-          <input type="file" className="hidden" accept="image/*" onChange={onUpload} />
+          <span className="text-[10px] font-bold text-slate-500">Click to Upload to Drive</span>
+          <input type="file" className="hidden" accept="image/*" onChange={onUpload} disabled={isUploading} />
         </label>
       </div>
     </div>
@@ -208,10 +233,11 @@ export const CMSManager: React.FC = () => {
           )}
           <button 
             onClick={publishCms}
-            disabled={isPublishDisabled}
-            className={`w-full sm:w-auto bg-orange-600 text-white px-8 py-3 rounded-xl font-black shadow-lg transition-all flex items-center justify-center gap-2 ${isPublishDisabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-orange-700'}`}
+            disabled={isPublishDisabled || isUploading}
+            className={`w-full sm:w-auto bg-orange-600 text-white px-8 py-3 rounded-xl font-black shadow-lg transition-all flex items-center justify-center gap-2 ${isPublishDisabled || isUploading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-orange-700'}`}
           >
-            <Globe size={18} /> PUBLISH CHANGES
+            {isUploading ? <Loader2 size={18} className="animate-spin" /> : <Globe size={18} />} 
+            PUBLISH CHANGES
           </button>
         </div>
       </div>
@@ -287,13 +313,13 @@ export const CMSManager: React.FC = () => {
                   <div className="space-y-2">
                     <label className="text-[10px] font-black uppercase text-slate-400">Founder Photo</label>
                     <div className="flex items-center gap-4">
-                      <div className="w-16 h-16 rounded-lg overflow-hidden border shrink-0">
-                        <img src={getBustedUrl(draftCms.founder2PhotoUrl, draftCms.updatedAt)} className="w-full h-full object-cover" />
+                      <div className="w-16 h-16 rounded-lg overflow-hidden border shrink-0 flex items-center justify-center">
+                        {isUploading ? <Loader2 className="animate-spin text-orange-500" /> : <img src={getBustedUrl(draftCms.founder2PhotoUrl, draftCms.updatedAt)} className="w-full h-full object-cover" />}
                       </div>
                       <label className="flex-grow flex items-center justify-center p-3 border-2 border-dashed rounded-xl bg-white cursor-pointer hover:border-orange-500">
                         <Upload size={16} className="text-slate-400 mr-2" />
-                        <span className="text-[10px] font-bold">Change Photo</span>
-                        <input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e, 'founder2PhotoUrl')} />
+                        <span className="text-[10px] font-bold">Upload to Drive</span>
+                        <input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e, 'founder2PhotoUrl')} disabled={isUploading} />
                       </label>
                     </div>
                   </div>
@@ -366,10 +392,10 @@ export const CMSManager: React.FC = () => {
             {draftCms.benefits.map((benefit, idx) => (
               <div key={benefit.id} className="p-6 bg-slate-50 rounded-2xl border flex flex-col sm:flex-row gap-6">
                 <div className="w-20 h-20 bg-white rounded-xl border flex items-center justify-center shrink-0 relative group/img overflow-hidden">
-                  <img src={getBustedUrl(benefit.imageUrl, draftCms.updatedAt)} className="w-full h-full object-cover rounded-xl" />
+                  {isUploading ? <Loader2 className="animate-spin text-orange-500" /> : <img src={getBustedUrl(benefit.imageUrl, draftCms.updatedAt)} className="w-full h-full object-cover rounded-xl" />}
                   <label className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center cursor-pointer">
                     <Upload size={16} className="text-white" />
-                    <input type="file" className="hidden" accept="image/*" onChange={(e) => handleListItemImageUpload(e, 'benefits', benefit.id)} />
+                    <input type="file" className="hidden" accept="image/*" onChange={(e) => handleListItemImageUpload(e, 'benefits', benefit.id)} disabled={isUploading} />
                   </label>
                 </div>
                 <div className="flex-grow space-y-4">
@@ -428,10 +454,10 @@ export const CMSManager: React.FC = () => {
             {draftCms.team.map((member, idx) => (
               <div key={member.id} className="p-6 bg-slate-50 rounded-2xl border flex flex-col sm:flex-row gap-6">
                 <div className="w-20 h-20 bg-white rounded-xl border flex items-center justify-center shrink-0 relative group/img overflow-hidden">
-                  <img src={getBustedUrl(member.photoUrl, draftCms.updatedAt)} className="w-full h-full object-cover rounded-xl" />
+                  {isUploading ? <Loader2 className="animate-spin text-orange-500" /> : <img src={getBustedUrl(member.photoUrl, draftCms.updatedAt)} className="w-full h-full object-cover rounded-xl" />}
                   <label className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center cursor-pointer">
                     <Upload size={16} className="text-white" />
-                    <input type="file" className="hidden" accept="image/*" onChange={(e) => handleListItemImageUpload(e, 'team', member.id)} />
+                    <input type="file" className="hidden" accept="image/*" onChange={(e) => handleListItemImageUpload(e, 'team', member.id)} disabled={isUploading} />
                   </label>
                 </div>
                 <div className="flex-grow space-y-4">
@@ -506,10 +532,10 @@ export const CMSManager: React.FC = () => {
             {draftCms.products.map((product) => (
               <div key={product.id} className="p-6 bg-slate-50 rounded-2xl border space-y-4">
                 <div className="h-40 bg-white rounded-xl border overflow-hidden relative group/prod-img">
-                  <img src={getBustedUrl(product.imageUrl, draftCms.updatedAt)} className="w-full h-full object-cover" />
+                  {isUploading ? <Loader2 className="animate-spin text-orange-500" /> : <img src={getBustedUrl(product.imageUrl, draftCms.updatedAt)} className="w-full h-full object-cover" />}
                   <label className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover/prod-img:opacity-100 transition-opacity flex items-center justify-center cursor-pointer">
                     <Upload size={20} className="text-white" />
-                    <input type="file" className="hidden" accept="image/*" onChange={(e) => handleListItemImageUpload(e, 'products', product.id)} />
+                    <input type="file" className="hidden" accept="image/*" onChange={(e) => handleListItemImageUpload(e, 'products', product.id)} disabled={isUploading} />
                   </label>
                 </div>
                 <input placeholder="Product Name" value={product.name} onChange={e => updateListItem('products', product.id, { name: e.target.value })} className="w-full px-4 py-2 border rounded-xl font-bold text-sm" />

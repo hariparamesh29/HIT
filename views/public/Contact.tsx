@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { useApp } from '../../AppContext';
-import { Mail, Phone, MapPin, Send } from 'lucide-react';
+import { Mail, Phone, MapPin, Send, Loader2 } from 'lucide-react';
 
 export const Contact: React.FC = () => {
   const { cms, addInquiry } = useApp();
@@ -13,20 +13,28 @@ export const Contact: React.FC = () => {
     message: ''
   });
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    addInquiry({
-      clientName: formData.name,
-      phone: formData.phone,
-      whatsapp: formData.whatsapp,
-      product: formData.product,
-      message: formData.message,
-      source: 'Website Contact Form'
-    });
-    setSubmitted(true);
-    setTimeout(() => setSubmitted(false), 5000);
-    setFormData({ name: '', phone: '', whatsapp: '', product: 'MS Heavy Scrap', message: '' });
+    setIsSubmitting(true);
+    try {
+      await addInquiry({
+        clientName: formData.name,
+        phone: formData.phone,
+        whatsapp: formData.whatsapp,
+        product: formData.product,
+        message: formData.message,
+        source: 'Website Contact Form'
+      });
+      setSubmitted(true);
+      setTimeout(() => setSubmitted(false), 5000);
+      setFormData({ name: '', phone: '', whatsapp: '', product: 'MS Heavy Scrap', message: '' });
+    } catch (err) {
+      console.error('Submission failed', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -75,7 +83,7 @@ export const Contact: React.FC = () => {
                 <Send size={40} />
               </div>
               <h3 className="text-2xl font-bold text-slate-900">Thank you!</h3>
-              <p className="text-slate-500">Your inquiry has been stored in our system. Our executive will call you shortly.</p>
+              <p className="text-slate-500">Your inquiry has been stored in our system and synced to our backend records. Our executive will call you shortly.</p>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-6">
@@ -109,8 +117,19 @@ export const Contact: React.FC = () => {
                 <label className="block text-sm font-bold text-slate-700 mb-2">Your Message</label>
                 <textarea required rows={4} value={formData.message} onChange={e => setFormData({...formData, message: e.target.value})} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500 outline-none" placeholder="Details about quantity, location etc."></textarea>
               </div>
-              <button type="submit" className="w-full bg-orange-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-orange-700 transition-all shadow-xl shadow-orange-900/20">
-                SEND INQUIRY NOW
+              <button 
+                type="submit" 
+                disabled={isSubmitting}
+                className="w-full bg-orange-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-orange-700 transition-all shadow-xl shadow-orange-900/20 flex items-center justify-center gap-3 disabled:opacity-70"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="animate-spin" size={24} />
+                    SYNCING...
+                  </>
+                ) : (
+                  'SEND INQUIRY NOW'
+                )}
               </button>
             </form>
           )}
